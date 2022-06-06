@@ -5,6 +5,7 @@ ranks = {}
 local chat3_exists = minetest.get_modpath("chat3")
 local registered   = {}
 local default
+local player
 
 -- Load mod storage
 local storage = minetest.get_mod_storage()
