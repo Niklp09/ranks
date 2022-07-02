@@ -1,8 +1,5 @@
--- ranks/init.lua
-
 ranks = {}
 
-local chat3_exists = minetest.get_modpath("chat3")
 local registered   = {}
 local default
 local player
@@ -75,80 +72,8 @@ function ranks.get_def(rank)
 	return registered[rank]
 end
 
--- [function] Update player privileges
-function ranks.update_privs(name, trigger)
-	if type(name) ~= "string" then
-    	name = name:get_player_name()
-	end
-
-	local rank = ranks.get_rank(name)
-	if rank ~= nil then
-		-- [local function] Warn
-		local function warn(msg)
-			if msg and trigger and minetest.get_player_by_name(trigger) then
-				minetest.chat_send_player(trigger, minetest.colorize("red", "Warning: ")..msg)
-			end
-		end
-
-		local def   = registered[rank]
-		if not def.privs then
-			return
-		end
-
-		if def.strict_privs == true then
-			minetest.set_player_privs(name, def.privs)
-			warn(name.."'s privileges have been reset to that of their rank (strict privileges)")
-			return true
-		end
-
-		local privs = minetest.get_player_privs(name)
-
-		if def.grant_missing == true then
-			local changed = false
-			for name, priv in pairs(def.privs) do
-				if not privs[name] and priv == true then
-					privs[name] = priv
-					changed = true
-				end
-			end
-
-			if changed then
-				warn("Missing rank privileges have been granted to "..name)
-			end
-		end
-
-		if def.revoke_extra == true then
-			local changed = false
-			for name, priv in pairs(privs) do
-				if not def.privs[name] then
-					privs[name] = nil
-					changed = true
-				end
-			end
-
-			if changed then
-				warn("Extra non-rank privileges have been revoked from "..name)
-			end
-		end
-
-		local admin = name == minetest.settings:get("name")
-		-- If owner, grant `rank` privilege
-		if admin then
-			local privs = minetest.get_player_privs(name)
-			privs["rank"] = true
-			minetest.set_player_privs(name, privs)
-		end
-
-		minetest.set_player_privs(name, privs)
-		return true
-	end
-end
-
 -- [function] Update player nametag
 function ranks.update_nametag(name)
-	if minetest.settings:get("ranks.prefix_nametag") == "false" then
-		return
-	end
 
 	if type(name) ~= "string" then
 		name = name:get_player_name()
@@ -190,8 +115,6 @@ function ranks.set_rank(name, rank)
 
 		-- Update nametag
 		ranks.update_nametag(name)
-		-- Update privileges
-		ranks.update_privs(name)
 
 		return true
 	end
@@ -216,31 +139,6 @@ function ranks.remove_rank(name)
 				text = name,
 				color = "#ffffff",
 			})
-			-- Update privileges
-			local basic_privs =
-				minetest.string_to_privs(minetest.settings:get("basic_privs") or "interact,shout")
-			minetest.set_player_privs(name, basic_privs)
-		end
-	end
-end
-
--- [function] Send prefixed message (if enabled)
-function ranks.chat_send(name, message)
-	if minetest.settings:get("ranks.prefix_chat") ~= "false" then
-		local rank = ranks.get_rank(name)
-		if rank ~= nil then
-			local def = ranks.get_def(rank)
-			if def.prefix then
-				local colour = get_colour(def.colour)
-				local prefix = minetest.colorize(colour, def.prefix)
-				if chat3_exists then
-					chat3.send(name, message, prefix.." ", "ranks")
-				else
-					minetest.chat_send_all(prefix.." <"..name.."> "..message)
-					minetest.log("action", "CHAT: ".."<"..name.."> "..message)
-				end
-				return true
-			end
 		end
 	end
 end
@@ -248,12 +146,6 @@ end
 ---
 --- Registrations
 ---
-
--- [privilege] Rank
-minetest.register_privilege("rank", {
-	description = "Permission to use /rank chatcommand",
-	give_to_singleplayer = false,
-})
 
 -- Assign/update rank on join player
 minetest.register_on_joinplayer(function(player)
@@ -278,8 +170,6 @@ minetest.register_on_joinplayer(function(player)
 	if ranks.get_rank(name) then
 		-- Update nametag
 		ranks.update_nametag(name)
-		-- Update privileges
-		ranks.update_privs(name)
 	else
 		if ranks.default then
 			ranks.set_rank(name, ranks.default)
@@ -287,16 +177,11 @@ minetest.register_on_joinplayer(function(player)
 	end
 end)
 
--- Prefix messages if enabled
-minetest.register_on_chat_message(function(name, message)
-	return ranks.chat_send(name, message)
-end)
-
 -- [chatcommand] /rank
 minetest.register_chatcommand("rank", {
 	description = "Set a player's rank",
 	params = "<player> <new rank> / \"list\" | username, rankname / list ranks",
-	privs = {rank = true},
+	privs = {server = true},
 	func = function(name, param)
 		local param = param:split(" ")
 		if #param == 0 then
@@ -332,74 +217,9 @@ minetest.register_chatcommand("rank", {
 	end,
 })
 
--- [chatcommand] /getrank
-minetest.register_chatcommand("getrank", {
-	description = "Get a player's rank. If no player is specified, your own rank is returned.",
-	params = "<name> | name of player",
-	func = function(name, param)
-		if param and param ~= "" then
-			local rank = ranks.get_rank(param)
-			if rank then
-				return true, "Rank of " .. param .. ": " .. rank:gsub("^%l", string.upper)
-			elseif minetest.player_exists(param) then
-				return false, "Rank of " .. param .. ": No rank"
-			else
-				return false, "Player does not exist"
-			end
-		else
-			local rank = ranks.get_rank(name) or "No rank"
-			return true, "Your rank: " .. rank:gsub("^%l", string.upper)
-		end
-	end,
-})
-
----
---- Overrides
----
-
-local grant = minetest.registered_chatcommands["grant"].func
--- [override] /grant
-minetest.registered_chatcommands["grant"].func = function(name, param)
-	local ok, msg = grant(name, param) -- Call original function
-
-	local grantname, grantprivstr = string.match(param, "([^ ]+) (.+)")
-	if grantname then
-		ranks.update_privs(grantname, name) -- Update privileges
-	end
-
-	return ok, msg
-end
-
-local grantme = minetest.registered_chatcommands["grantme"].func
--- [override] /grantme
-minetest.registered_chatcommands["grantme"].func = function(name, param)
-	local ok, msg = grantme(name, param) -- Call original function
-	ranks.update_privs(name, name) -- Update privileges
-	return ok, msg
-end
-
-local revoke = minetest.registered_chatcommands["revoke"].func
--- [override] /revoke
-minetest.registered_chatcommands["revoke"].func = function(name, param)
-	local ok, msg = revoke(name, param) -- Call original function
-
-	local revokename, revokeprivstr = string.match(param, "([^ ]+) (.+)")
-	if revokename then
-		ranks.update_privs(revokename, name) -- Update privileges
-	end
-
-	return ok, msg
-end
-
 ---
 --- Ranks
 ---
 
 -- Load default ranks
 dofile(minetest.get_modpath("ranks").."/ranks.lua")
-
-local path = minetest.get_worldpath().."/ranks.lua"
--- Attempt to load per-world ranks
-if io.open(path) then
-	dofile(path)
-end
